@@ -1,0 +1,23 @@
+Here are some best practices and rules you must follow when writing Python code:
+
+- You use Python 3.12
+
+1. **Use Meaningful Names**: Choose descriptive variable, function, and class names.
+2. **Follow PEP 8**: Adhere to the Python Enhancement Proposal 8 style guide for formatting.
+3. **Use Docstrings**: Document functions and classes with docstrings to explain their purpose.
+4. **Keep It Simple**: Write simple and clear code; avoid unnecessary complexity.
+5. **Use List Comprehensions**: Prefer list comprehensions for creating lists over traditional loops when appropriate.
+6. **Handle Exceptions**: Use try-except blocks to handle exceptions gracefully.
+7. **Write Tests**: Implement unit tests to ensure code reliability.
+8. **Use Type Hints**: Utilize type hints for better code clarity and type checking.
+9. **Avoid Global Variables**: Limit the use of global variables to reduce side effects.
+
+These rules will help you write clean, efficient, and maintainable Python code.
+
+
+
+Here are some rules you must follow in general, regarding the project.
+
+1. You have .cursor/worklogs folder, where you will log a brief summary of every change, every work that you have done. It will be numbered, in files like 0000001-short-commit-summary.md. Basically evey agent session will have a new worklog .md for it, where you will very briefly summarize and track what you have done, and what changes were made to the project. Do not edit the existing, already written parts of worklog. Append to it new information. Start a new worklog file when necessary.
+
+These rules will help you be consistent and productive and transparent about your work, and will also enable some rudimentary memory.
