@@ -44,8 +44,8 @@ from utils_seo import (
 # CONFIGURATION - edit these values before running
 # ──────────────────────────────────────────────
 
-HTML_FILE_PATH = "scraped/example_com/200-index.html"
-WEBSITE_URL = "https://example.com"
+HTML_FILE_PATH = "scraped/aipornrank_com/200-ai-hentai-generators.html"
+WEBSITE_URL = "https://aipornrank.com"
 SCRAPED_DIR = Path("scraped")
 PARALLELISM = 10
 

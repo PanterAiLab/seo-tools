@@ -39,10 +39,12 @@ Our goal is to create a simple crawler / parser that will verify the best SEO pr
 
 # 3 - Page Checker
 
+The main goal is to easily debug and verify all the main elements of a single HTML page and make sure everything follows the best SEO practices.
+
 ### Flow
 1) Check H1/H2 titles. Only one H1 per page.
-2) Check all internal links on this page, and their response codes.
-3) Check all external links on this page, and their response codes.
+2) Check all internal links on this page, and their response codes, and the keywords.
+3) Check all external links on this page, and their response codes, and the keywords.
 4) Check page title and other SEO related things (TODO: expand on this)
 5) Check images, their links, their response codes, their alt texts.
 
