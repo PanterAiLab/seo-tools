@@ -319,14 +319,534 @@ def extract_twitter_card(soup: BeautifulSoup) -> TwitterCardInfo:
     )
 
 
+def _get_schema_type(data: dict) -> str:
+    """Get normalized schema type from JSON-LD data.
+
+    Args:
+        data: JSON-LD data dict.
+
+    Returns:
+        Schema type as string, joined by comma if multiple types.
+    """
+    schema_type = data.get("@type", "Unknown")
+    if isinstance(schema_type, list):
+        return ", ".join(schema_type)
+    return schema_type
+
+
+def _get_str(data: dict, key: str) -> str | None:
+    """Safely extract a string value from schema data."""
+    val = data.get(key)
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        return val.get("@value") or val.get("name") or val.get("url")
+    if isinstance(val, list) and val:
+        return _get_str({"v": val[0]}, "v")
+    return str(val) if val else None
+
+
+def _get_int(data: dict, key: str) -> int | None:
+    """Safely extract an integer value from schema data."""
+    val = data.get(key)
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, str):
+        try:
+            return int(val)
+        except ValueError:
+            return None
+    return None
+
+
+def _get_float(data: dict, key: str) -> float | None:
+    """Safely extract a float value from schema data."""
+    val = data.get(key)
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val.replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_faq_schema(data: dict) -> dict:
+    """Parse FAQPage schema into normalized structure.
+
+    Args:
+        data: Raw FAQPage JSON-LD data.
+
+    Returns:
+        Dict with questions list containing question/answer pairs.
+    """
+    questions = []
+    main_entity = data.get("mainEntity", [])
+    if not isinstance(main_entity, list):
+        main_entity = [main_entity]
+
+    for entity in main_entity:
+        if not isinstance(entity, dict):
+            continue
+        entity_type = entity.get("@type", "")
+        if entity_type == "Question":
+            question = _get_str(entity, "name")
+            accepted_answer = entity.get("acceptedAnswer", {})
+            answer = None
+            if isinstance(accepted_answer, dict):
+                answer = _get_str(accepted_answer, "text")
+            if question:
+                questions.append({"question": question, "answer": answer})
+
+    return {"questions": questions}
+
+
+def _parse_product_schema(data: dict) -> dict:
+    """Parse Product schema into normalized structure.
+
+    Args:
+        data: Raw Product JSON-LD data.
+
+    Returns:
+        Dict with product details including price, availability, reviews.
+    """
+    parsed: dict = {
+        "name": _get_str(data, "name"),
+        "price": None,
+        "currency": None,
+        "availability": None,
+        "rating": None,
+        "review_count": None,
+        "images": [],
+    }
+
+    # Extract offers (price, currency, availability)
+    offers = data.get("offers")
+    if offers:
+        if isinstance(offers, list):
+            offers = offers[0] if offers else {}
+        if isinstance(offers, dict):
+            parsed["price"] = _get_float(offers, "price")
+            parsed["currency"] = _get_str(offers, "priceCurrency")
+            availability = _get_str(offers, "availability")
+            if availability:
+                parsed["availability"] = availability.replace("https://schema.org/", "").replace("http://schema.org/", "")
+
+    # Extract aggregate rating
+    rating = data.get("aggregateRating")
+    if isinstance(rating, dict):
+        parsed["rating"] = _get_float(rating, "ratingValue")
+        parsed["review_count"] = _get_int(rating, "reviewCount") or _get_int(rating, "ratingCount")
+
+    # Extract images
+    image = data.get("image")
+    if image:
+        if isinstance(image, str):
+            parsed["images"] = [image]
+        elif isinstance(image, list):
+            parsed["images"] = [img if isinstance(img, str) else img.get("url", "") for img in image if img]
+        elif isinstance(image, dict):
+            url = image.get("url")
+            if url:
+                parsed["images"] = [url]
+
+    return parsed
+
+
+def _parse_article_schema(data: dict) -> dict:
+    """Parse Article/NewsArticle/BlogPosting schema into normalized structure.
+
+    Args:
+        data: Raw Article JSON-LD data.
+
+    Returns:
+        Dict with article details including headline, author, dates.
+    """
+    parsed: dict = {
+        "headline": _get_str(data, "headline") or _get_str(data, "name"),
+        "author": None,
+        "date_published": _get_str(data, "datePublished"),
+        "date_modified": _get_str(data, "dateModified"),
+        "image": None,
+    }
+
+    # Extract author (can be string, object, or array)
+    author = data.get("author")
+    if author:
+        if isinstance(author, str):
+            parsed["author"] = author
+        elif isinstance(author, dict):
+            parsed["author"] = _get_str(author, "name")
+        elif isinstance(author, list):
+            authors = []
+            for a in author:
+                if isinstance(a, str):
+                    authors.append(a)
+                elif isinstance(a, dict):
+                    name = _get_str(a, "name")
+                    if name:
+                        authors.append(name)
+            parsed["author"] = authors if len(authors) > 1 else (authors[0] if authors else None)
+
+    # Extract image
+    image = data.get("image")
+    if image:
+        if isinstance(image, str):
+            parsed["image"] = image
+        elif isinstance(image, dict):
+            parsed["image"] = _get_str(image, "url")
+        elif isinstance(image, list) and image:
+            first = image[0]
+            if isinstance(first, str):
+                parsed["image"] = first
+            elif isinstance(first, dict):
+                parsed["image"] = _get_str(first, "url")
+
+    return parsed
+
+
+def _parse_image_schema(data: dict) -> dict:
+    """Parse ImageObject schema into normalized structure.
+
+    Args:
+        data: Raw ImageObject JSON-LD data.
+
+    Returns:
+        Dict with image details including url, caption, dimensions.
+    """
+    return {
+        "url": _get_str(data, "url") or _get_str(data, "contentUrl"),
+        "caption": _get_str(data, "caption"),
+        "width": _get_int(data, "width"),
+        "height": _get_int(data, "height"),
+        "license": _get_str(data, "license"),
+    }
+
+
+def _parse_video_schema(data: dict) -> dict:
+    """Parse VideoObject schema into normalized structure.
+
+    Args:
+        data: Raw VideoObject JSON-LD data.
+
+    Returns:
+        Dict with video details including url, thumbnail, duration.
+    """
+    return {
+        "url": _get_str(data, "contentUrl") or _get_str(data, "url"),
+        "name": _get_str(data, "name"),
+        "description": _get_str(data, "description"),
+        "thumbnail": _get_str(data, "thumbnailUrl"),
+        "duration": _get_str(data, "duration"),
+        "upload_date": _get_str(data, "uploadDate"),
+    }
+
+
+def _parse_organization_schema(data: dict) -> dict:
+    """Parse Organization/LocalBusiness schema into normalized structure.
+
+    Args:
+        data: Raw Organization JSON-LD data.
+
+    Returns:
+        Dict with organization details including name, address, contact.
+    """
+    parsed: dict = {
+        "name": _get_str(data, "name"),
+        "url": _get_str(data, "url"),
+        "logo": None,
+        "address": None,
+        "phone": _get_str(data, "telephone"),
+    }
+
+    # Extract logo
+    logo = data.get("logo")
+    if logo:
+        if isinstance(logo, str):
+            parsed["logo"] = logo
+        elif isinstance(logo, dict):
+            parsed["logo"] = _get_str(logo, "url")
+
+    # Extract address
+    address = data.get("address")
+    if address:
+        if isinstance(address, str):
+            parsed["address"] = address
+        elif isinstance(address, dict):
+            parts = []
+            for field in ["streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry"]:
+                val = _get_str(address, field)
+                if val:
+                    parts.append(val)
+            if parts:
+                parsed["address"] = ", ".join(parts)
+
+    return parsed
+
+
+def _parse_breadcrumb_schema(data: dict) -> dict:
+    """Parse BreadcrumbList schema into normalized structure.
+
+    Args:
+        data: Raw BreadcrumbList JSON-LD data.
+
+    Returns:
+        Dict with list of breadcrumb items with position, name, url.
+    """
+    items = []
+    item_list = data.get("itemListElement", [])
+    if not isinstance(item_list, list):
+        item_list = [item_list]
+
+    for element in item_list:
+        if not isinstance(element, dict):
+            continue
+        position = _get_int(element, "position")
+        name = _get_str(element, "name")
+        url = None
+
+        item = element.get("item")
+        if item:
+            if isinstance(item, str):
+                url = item
+            elif isinstance(item, dict):
+                url = _get_str(item, "@id") or _get_str(item, "url")
+                if not name:
+                    name = _get_str(item, "name")
+
+        if name or url:
+            items.append({"position": position, "name": name, "url": url})
+
+    items.sort(key=lambda x: x.get("position") or 0)
+    return {"items": items}
+
+
+def _parse_howto_schema(data: dict) -> dict:
+    """Parse HowTo schema into normalized structure.
+
+    Args:
+        data: Raw HowTo JSON-LD data.
+
+    Returns:
+        Dict with name, steps list, and total time.
+    """
+    parsed: dict = {
+        "name": _get_str(data, "name"),
+        "steps": [],
+        "total_time": _get_str(data, "totalTime"),
+    }
+
+    steps = data.get("step", [])
+    if not isinstance(steps, list):
+        steps = [steps]
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_name = _get_str(step, "name")
+        step_text = _get_str(step, "text")
+        if step_name or step_text:
+            parsed["steps"].append({"name": step_name, "text": step_text})
+
+    return parsed
+
+
+def _parse_recipe_schema(data: dict) -> dict:
+    """Parse Recipe schema into normalized structure.
+
+    Args:
+        data: Raw Recipe JSON-LD data.
+
+    Returns:
+        Dict with name, ingredients, instructions, cook/prep times.
+    """
+    parsed: dict = {
+        "name": _get_str(data, "name"),
+        "ingredients": [],
+        "instructions": [],
+        "cook_time": _get_str(data, "cookTime"),
+        "prep_time": _get_str(data, "prepTime"),
+    }
+
+    # Extract ingredients
+    ingredients = data.get("recipeIngredient", [])
+    if isinstance(ingredients, list):
+        parsed["ingredients"] = [str(i) for i in ingredients if i]
+    elif ingredients:
+        parsed["ingredients"] = [str(ingredients)]
+
+    # Extract instructions
+    instructions = data.get("recipeInstructions", [])
+    if not isinstance(instructions, list):
+        instructions = [instructions]
+
+    for instr in instructions:
+        if isinstance(instr, str):
+            parsed["instructions"].append(instr)
+        elif isinstance(instr, dict):
+            text = _get_str(instr, "text")
+            if text:
+                parsed["instructions"].append(text)
+
+    return parsed
+
+
+def _parse_event_schema(data: dict) -> dict:
+    """Parse Event schema into normalized structure.
+
+    Args:
+        data: Raw Event JSON-LD data.
+
+    Returns:
+        Dict with event details including dates, location, price.
+    """
+    parsed: dict = {
+        "name": _get_str(data, "name"),
+        "start_date": _get_str(data, "startDate"),
+        "end_date": _get_str(data, "endDate"),
+        "location": None,
+        "price": None,
+    }
+
+    # Extract location
+    location = data.get("location")
+    if location:
+        if isinstance(location, str):
+            parsed["location"] = location
+        elif isinstance(location, dict):
+            loc_name = _get_str(location, "name")
+            loc_address = location.get("address")
+            if loc_address and isinstance(loc_address, dict):
+                addr_parts = []
+                for field in ["streetAddress", "addressLocality", "addressRegion"]:
+                    val = _get_str(loc_address, field)
+                    if val:
+                        addr_parts.append(val)
+                if loc_name:
+                    parsed["location"] = f"{loc_name}, {', '.join(addr_parts)}" if addr_parts else loc_name
+                elif addr_parts:
+                    parsed["location"] = ", ".join(addr_parts)
+            elif loc_name:
+                parsed["location"] = loc_name
+
+    # Extract price from offers
+    offers = data.get("offers")
+    if offers:
+        if isinstance(offers, list):
+            offers = offers[0] if offers else {}
+        if isinstance(offers, dict):
+            parsed["price"] = _get_float(offers, "price")
+
+    return parsed
+
+
+def _parse_website_schema(data: dict) -> dict:
+    """Parse WebSite schema into normalized structure.
+
+    Args:
+        data: Raw WebSite JSON-LD data.
+
+    Returns:
+        Dict with website details including name, url, search action.
+    """
+    parsed: dict = {
+        "name": _get_str(data, "name"),
+        "url": _get_str(data, "url"),
+        "search_url_template": None,
+    }
+
+    # Extract search action
+    potential_action = data.get("potentialAction")
+    if potential_action:
+        if isinstance(potential_action, list):
+            potential_action = potential_action[0] if potential_action else {}
+        if isinstance(potential_action, dict):
+            action_type = potential_action.get("@type", "")
+            if action_type == "SearchAction":
+                target = potential_action.get("target")
+                if isinstance(target, str):
+                    parsed["search_url_template"] = target
+                elif isinstance(target, dict):
+                    parsed["search_url_template"] = _get_str(target, "urlTemplate")
+
+    return parsed
+
+
+def _parse_itemlist_schema(data: dict) -> dict:
+    """Parse ItemList schema into normalized structure.
+
+    Args:
+        data: Raw ItemList JSON-LD data.
+
+    Returns:
+        Dict with list of items containing position and name/url.
+    """
+    items = []
+    item_list = data.get("itemListElement", [])
+    if not isinstance(item_list, list):
+        item_list = [item_list]
+
+    for element in item_list:
+        if not isinstance(element, dict):
+            continue
+        position = _get_int(element, "position")
+        item = element.get("item")
+        name = _get_str(element, "name")
+        url = _get_str(element, "url")
+
+        if item:
+            if isinstance(item, str):
+                url = item
+            elif isinstance(item, dict):
+                if not name:
+                    name = _get_str(item, "name")
+                if not url:
+                    url = _get_str(item, "url") or _get_str(item, "@id")
+
+        if name or url:
+            items.append({"position": position, "name": name, "url": url})
+
+    return {"items": items, "count": len(items)}
+
+
+# Map schema types to their parser functions
+_SCHEMA_PARSERS: dict = {
+    "FAQPage": _parse_faq_schema,
+    "Product": _parse_product_schema,
+    "Article": _parse_article_schema,
+    "NewsArticle": _parse_article_schema,
+    "BlogPosting": _parse_article_schema,
+    "ImageObject": _parse_image_schema,
+    "VideoObject": _parse_video_schema,
+    "Organization": _parse_organization_schema,
+    "LocalBusiness": _parse_organization_schema,
+    "BreadcrumbList": _parse_breadcrumb_schema,
+    "HowTo": _parse_howto_schema,
+    "Recipe": _parse_recipe_schema,
+    "Event": _parse_event_schema,
+    "WebSite": _parse_website_schema,
+    "ItemList": _parse_itemlist_schema,
+}
+
+
 def extract_structured_data(soup: BeautifulSoup) -> list[SchemaInfo]:
     """Extract JSON-LD structured data from the page.
+
+    Supports all common schema.org types and extracts key fields
+    into a normalized parsed dict for each schema.
 
     Args:
         soup: A BeautifulSoup object of the parsed HTML.
 
     Returns:
-        List of SchemaInfo with type and raw data for each JSON-LD block.
+        List of SchemaInfo with type, raw data, and parsed fields.
     """
     schemas: list[SchemaInfo] = []
 
@@ -342,19 +862,35 @@ def extract_structured_data(soup: BeautifulSoup) -> list[SchemaInfo]:
         except json.JSONDecodeError:
             continue
 
-        # Handle both single objects and arrays of objects
-        items = data if isinstance(data, list) else [data]
+        # Collect all schema objects to process
+        items_to_process: list[dict] = []
 
-        for item in items:
+        if isinstance(data, list):
+            items_to_process.extend(data)
+        elif isinstance(data, dict):
+            # Handle @graph arrays (common pattern in modern websites)
+            if "@graph" in data:
+                graph = data["@graph"]
+                if isinstance(graph, list):
+                    items_to_process.extend(graph)
+                elif isinstance(graph, dict):
+                    items_to_process.append(graph)
+            else:
+                items_to_process.append(data)
+
+        for item in items_to_process:
             if not isinstance(item, dict):
                 continue
 
-            schema_type = item.get("@type", "Unknown")
-            # Handle array of types (e.g., ["Product", "ItemList"])
-            if isinstance(schema_type, list):
-                schema_type = ", ".join(schema_type)
+            schema_type = _get_schema_type(item)
 
-            schemas.append(SchemaInfo(type=schema_type, raw=item))
+            # Find and apply appropriate parser
+            parsed: dict = {}
+            primary_type = schema_type.split(",")[0].strip()
+            if primary_type in _SCHEMA_PARSERS:
+                parsed = _SCHEMA_PARSERS[primary_type](item)
+
+            schemas.append(SchemaInfo(type=schema_type, raw=item, parsed=parsed))
 
     return schemas
 

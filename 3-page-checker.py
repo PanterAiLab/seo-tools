@@ -44,8 +44,9 @@ from utils_seo import (
 # CONFIGURATION - edit these values before running
 # ──────────────────────────────────────────────
 
-HTML_FILE_PATH = "scraped/aipornrank_com/200-ai-hentai-generators.html"
-WEBSITE_URL = "https://aipornrank.com"
+# HTML_FILE_PATH = "scraped/snaptik_app_archive/20230220-192556.html"
+HTML_FILE_PATH = "scraped/snaptik_app_archive/20240609-175516.html"
+WEBSITE_URL = "https://snaptik.app"
 SCRAPED_DIR = Path("scraped")
 PARALLELISM = 10
 

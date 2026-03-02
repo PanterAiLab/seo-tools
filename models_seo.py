@@ -89,6 +89,7 @@ class LinkInfo:
     rel: list[str] = field(default_factory=list)
     is_internal: bool = False
     status: int | None = None
+    content_type: str = "text"  # text, image, logo, icon, button, svg, mixed, empty
 
 
 @dataclass
@@ -133,6 +134,7 @@ class SchemaInfo:
 
     type: str
     raw: dict[str, Any] = field(default_factory=dict)
+    parsed: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

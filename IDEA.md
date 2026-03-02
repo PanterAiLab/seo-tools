@@ -59,3 +59,8 @@ A tool that will scrape website snapshots from the web.archive.org site, our mai
 2) We will download all snapshot list jsons from the http://web.archive.org/cdx/search/cdx, going back to the first recorded snapshot, and save these jsons to the folder. The folder will be the "$WEBSITE_ID_archive" folder.   
 3) We will have the frequency of snapshot downloads hardcoded in the beginning of the script. Daily, weekly, monthly. We will try to download HTMLs from snapshots with this frequency. So only 1 per day, 1 per week, 1 per month. Pick a middle point.   
 4) Frequency downloads of HTML should be handled by first parsing the timestamps and distributing the snapshots along a timeline.
+
+
+
+# 5 - Page Check Results Comparisons
+

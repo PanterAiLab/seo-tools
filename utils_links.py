@@ -1,10 +1,11 @@
 """Utility functions for extracting and verifying links and images from HTML."""
 
 import asyncio
+import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 import httpx
 
 from models_seo import ImageInfo, LinkInfo
@@ -15,6 +16,107 @@ from utils_requests import fetch_head
 
 # Image format extensions
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg"}
+
+# Patterns to detect logo/icon links
+LOGO_PATTERNS = re.compile(r"\b(logo|brand|site-logo|header-logo)\b", re.IGNORECASE)
+ICON_PATTERNS = re.compile(r"\b(icon|fa-|fab-|fas-|material-icons|glyphicon)\b", re.IGNORECASE)
+BUTTON_PATTERNS = re.compile(r"\b(btn|button|cta)\b", re.IGNORECASE)
+
+
+def _detect_link_content_type(anchor: Tag) -> str:
+    """Detect the content type of an anchor element.
+
+    Analyzes the contents of an <a> tag to determine what it contains:
+    - text: Only text content
+    - image: Contains an <img> tag
+    - logo: Contains an image that appears to be a logo (by class/id/alt)
+    - icon: Contains an icon (font icon, svg icon, or icon class)
+    - button: Styled as a button (by class)
+    - svg: Contains an SVG element
+    - mixed: Contains both text and image/icon
+    - empty: No content at all
+
+    Args:
+        anchor: BeautifulSoup Tag object for the <a> element.
+
+    Returns:
+        Content type string.
+    """
+    # Get all classes from the anchor and its children
+    anchor_classes = " ".join(anchor.get("class", []))
+    anchor_id = anchor.get("id", "") or ""
+
+    # Check for images
+    images = anchor.find_all("img")
+    has_image = len(images) > 0
+
+    # Check for SVG
+    svgs = anchor.find_all("svg")
+    has_svg = len(svgs) > 0
+
+    # Check for icon elements (font icons like FontAwesome, Material Icons)
+    icons = anchor.find_all("i") + anchor.find_all("span", class_=ICON_PATTERNS)
+    has_icon = len(icons) > 0
+
+    # Check if any child has icon-like classes
+    for child in anchor.descendants:
+        if isinstance(child, Tag):
+            child_classes = " ".join(child.get("class", []))
+            if ICON_PATTERNS.search(child_classes):
+                has_icon = True
+                break
+
+    # Get text content
+    text = anchor.get_text(strip=True)
+    has_text = bool(text)
+
+    # Determine if this is a logo
+    is_logo = False
+    if has_image:
+        for img in images:
+            img_classes = " ".join(img.get("class", []))
+            img_alt = img.get("alt", "") or ""
+            img_src = img.get("src", "") or ""
+            if (
+                LOGO_PATTERNS.search(img_classes)
+                or LOGO_PATTERNS.search(img_alt)
+                or LOGO_PATTERNS.search(img_src)
+            ):
+                is_logo = True
+                break
+    # Check anchor itself for logo patterns
+    if LOGO_PATTERNS.search(anchor_classes) or LOGO_PATTERNS.search(anchor_id):
+        is_logo = True
+
+    # Check if styled as a button
+    is_button = bool(BUTTON_PATTERNS.search(anchor_classes))
+
+    # Determine content type based on findings
+    if not has_image and not has_svg and not has_icon and not has_text:
+        return "empty"
+
+    if is_logo:
+        return "logo"
+
+    if is_button and has_text:
+        return "button"
+
+    if has_icon and not has_image and not has_text:
+        return "icon"
+
+    if has_svg and not has_image and not has_text:
+        return "svg"
+
+    if has_image and not has_text:
+        return "image"
+
+    if has_image and has_text:
+        return "mixed"
+
+    if has_icon and has_text:
+        return "mixed"
+
+    return "text"
 
 
 def extract_links(
@@ -65,10 +167,14 @@ def extract_links(
         else:
             rel_list = list(rel_attr)
 
+        # Detect content type
+        content_type = _detect_link_content_type(anchor)
+
         link_info = LinkInfo(
             href=absolute_url,
             anchor=anchor_text,
             rel=rel_list,
+            content_type=content_type,
         )
 
         if is_same_domain(absolute_url, site_url):
